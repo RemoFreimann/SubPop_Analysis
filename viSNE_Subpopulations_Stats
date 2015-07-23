@@ -1,0 +1,757 @@
+############################################################################
+#                                                                                                 
+# SCRIPT FOR STATISTICAL EVALUATIONS OF THE DATA SETS FROM THE MANUSCRIPT:
+#
+# "Tracking biofilm community structure with flow-cytometry and viSNE:
+#  phenotypic diversity, decaying cells and microplastics"
+#
+#  by Sgier L, Freimann R, Zupanic A, Kroll A [2015]
+#                                                                                                 
+############################################################################
+
+
+
+# unlock lines constraint for working folder if necessary 
+
+.trPaths <- paste(paste(Sys.getenv('APPDATA'), '\\Tinn-R\\tmp\\',
+                  sep=''), c('', 'search.txt', 'objects.txt', 'file.r', 'selection.r',
+                  'block.r', 'lines.r'), sep='')
+
+# install potentially missing packages
+
+list.of.packages <- c("vegan","RcmdrMisc", "multcomp", "plotrix", "RColorBrewer", "gplots")
+new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+
+
+
+# load packages and functions
+
+library(vegan)
+library(multcomp)
+library(plotrix)
+library(RcmdrMisc)
+library(RColorBrewer)
+library(gplots)
+
+
+
+# import data sets as tab delimmited .txt file
+# "Data" is the field data set, whereas Data.Lab is the laboratory data set 
+
+Data<-read.table(file.choose(),header=TRUE, sep="\t", na.strings="NA", dec=".", strip.white=TRUE)
+Data.Lab<-read.table(file.choose(),header=TRUE, sep="\t", na.strings="NA", dec=".", strip.white=TRUE)
+
+
+# set row names
+
+row.names(Data) <- as.character(Data$X)
+Data$X <- NULL
+
+row.names(Data.Lab) <- as.character(Data.Lab$X)
+Data.Lab$X <- NULL
+
+
+
+# sub data sets from raw data
+
+ClustersRaw         <-Data[,c((which(colnames(Data)=="MA1")):c(which(colnames(Data)=="MA10")))]  # clusters are eaqual to viSNE subpopulations
+PhysicoChemicalRaw  <-Data[,c((which(colnames(Data)=="temp")):(which(colnames(Data)=="TOC")))]
+SpeciesRaw          <-Data[,c((which(colnames(Data)=="Phormidium.autumnale")):(which(colnames(Data)=="Protozoa")))]
+Location            <-Data[,c((which(colnames(Data)=="Location")))]
+
+Clusters.Lab.Raw    <-Data.Lab[,c((which(colnames(Data.Lab)=="LA1")):c(which(colnames(Data.Lab)=="LA15")))]
+Time                <-Data.Lab[,c((which(colnames(Data.Lab)=="time")))]
+
+                           
+
+# data standardization and transformations
+
+ClusterHel           <-decostand(ClustersRaw, "hellinger")     # square root of equally standardized row sums
+ClusterNorm          <-decostand(ClustersRaw, method="total")  # standardized to equal row sum
+
+PhysicoChemicalLog   <-log1p(PhysicoChemicalRaw)
+PhysicoChemicalHel   <-decostand(PhysicoChemicalRaw, method="hellinger")
+SpeciesHel           <-decostand(SpeciesRaw, "hellinger")
+
+ClusterLabNorm         <-decostand(Clusters.Lab.Raw, method="total")  
+
+
+
+###################################################################################
+## Redundancy analysis model assessments (forward, backward and marginal selection)
+###################################################################################
+
+Cluster.rda<-rda(ClusterHel~., PhysicoChemicalLog)
+
+(Cluster.rda.forward <- ordiR2step (rda(ClusterHel~1, PhysicoChemicalLog),
+                                  scope= formula(Cluster.rda),
+                                  direction="forward",pstep=100,nperm=9999))
+
+(Cluster.rda.backward <- ordistep (rda(ClusterHel~., PhysicoChemicalLog),
+                                   direction="backward",pstep=100,nperm=9999))
+
+(Cluster.rda.both <- ordiR2step (rda(ClusterHel~1, PhysicoChemicalLog),
+                               scope= formula(Cluster.rda),
+                               direction="both",pstep=100,nperm=9999))
+
+
+
+#################################################
+# the best terms for the final model are assessed
+#################################################
+
+(summarized.selection<- c(rownames(Cluster.rda.forward$CCA$biplot),
+                         rownames(Cluster.rda.backward$CCA$biplot),
+                         rownames(Cluster.rda.both$CCA$biplot)))
+
+(constrains.freq.table<- as.data.frame(sort(table(summarized.selection))))
+(FORMULA <-as.formula(paste("ClusterHel ~ ",paste(names(which(constrains.freq.table[,1]>=2)),
+                                                   collapse="+"),sep = "")))   
+    
+
+
+#######################################################################################################
+#
+# Run selected RDA model and apriori fit benthic species and physico-chemical variables not included in
+# the RDA
+#
+########################################################################################################
+
+(Cluster.rda.best.forwsel <- rda(FORMULA, PhysicoChemicalLog))
+summary(Cluster.rda.best.forwsel)
+                
+# test the variation inflation factors and significance of models, axes and constraints
+
+                vif.cca(Cluster.rda.best.forwsel)
+                
+                anova(Cluster.rda.best.forwsel)
+                
+                anova(Cluster.rda.best.forwsel, by="axis", permutations = how(nperm=999),
+                      model = c("direct"),
+                      strata = NULL,
+                      cutoff = 1)
+                
+                anova(Cluster.rda.best.forwsel, by="terms", permutations = how(nperm=999),
+                      model = c("direct"), 
+                      parallel = getOption("mc.cores"), strata = NULL,
+                      scope = NULL)
+  
+                
+
+
+# fit the non-used environmental variables in the RDA model
+
+(best.model.env.selection <-c(rownames(Cluster.rda.best.forwsel$CCA$biplot)))
+(rest.model.env.selection <-PhysicoChemicalRaw[! c(colnames(PhysicoChemicalRaw)) %in% best.model.env.selection])
+    
+(envfit.rest  <- envfit(Cluster.rda.best.forwsel, rest.model.env.selection))
+    
+(envfit       <- envfit(Cluster.rda.best.forwsel, PhysicoChemicalRaw, display="sites"))           
+
+# fit the species in the rda model
+
+(speciesfit   <- envfit(Cluster.rda.best.forwsel, SpeciesHel))
+
+
+
+#########################################################################################
+# Bi-plot of the RDA model          (all following plots will be directly saved as PDF's)
+#########################################################################################
+
+        my.color1<-c(gray.colors(length(unique(Location)), start = 0.1, end = 0.9, gamma = 2.2, alpha = NULL))
+        my.color2<-c("dodgerblue","yellow", "cyan", "yellow2", "lightblue","orange")
+        my.color3<-c(1:16)
+
+
+pdf("RDA of Clusters with Env as constraint.pdf",useDingbats=FALSE)
+
+# Basic Plot
+
+ordiplot<-plot(Cluster.rda.best.forwsel,type="none",choices = c(1, 2),scaling=3,main="", xlab="",ylab="")           
+          
+points(ordiplot,"sites", pch=21,cex=1.5, col=my.color1[as.numeric(Data$Location)], bg=my.color1[as.numeric(Data$Location)])  
+
+      # Confidence ellipses for the Locations (SE +-95%)
+      
+      (groupz<-sort(unique(Data$Location)))
+      with(Data,ordiellipse(ordiplot, Location, kind="se", conf=0.95, label=TRUE, cex=0.8, col=my.color1[1], show.groups=groupz[1],draw="polygon", alpha=30))
+      with(Data,ordiellipse(ordiplot, Location, kind="se", conf=0.95, label=TRUE, cex=0.8, col=my.color1[2], show.groups=groupz[2],draw="polygon", alpha=30))
+      with(Data,ordiellipse(ordiplot, Location, kind="se", conf=0.95, label=TRUE, cex=0.8, col=my.color1[3], show.groups=groupz[3],draw="polygon", alpha=30))
+      with(Data,ordiellipse(ordiplot, Location, kind="se", conf=0.95, label=TRUE, cex=0.8, col=my.color1[4], show.groups=groupz[4],draw="polygon", alpha=30))
+      with(Data,ordiellipse(ordiplot, Location, kind="se", conf=0.95, label=TRUE, cex=0.8, col=my.color1[5], show.groups=groupz[5],draw="polygon", alpha=30))
+      with(Data,ordiellipse(ordiplot, Location, kind="se", conf=0.95, label=TRUE, cex=0.8, col=my.color1[6], show.groups=groupz[6],draw="polygon", alpha=30))
+
+
+      # plot the significant environmental variables from the selected canonical model
+      
+      arrows(0, 0, Cluster.rda.best.forwsel$CCA$biplot[, 1]*0.9, Cluster.rda.best.forwsel$CCA$biplot[, 2]*0.9, lty=1,lwd=3, col="black",
+             length = 0.15, angle = 30)
+      
+      
+      text(Cluster.rda.best.forwsel$CCA$biplot[, 1]*1, Cluster.rda.best.forwsel$CCA$biplot[, 2]*1,
+           labels=unlist(dimnames(Cluster.rda.best.forwsel$CCA$biplot)[1]))
+
+         
+
+
+                  # Optionally: plot the rest of the environmental variables if you wish to....
+                  
+                  pval.limit <- which(c(envfit.rest$vectors$pvals)<=1) # set max p-value 
+
+                  (envfit.vectors       <- scores(envfit.rest,"vectors")[c(pval.limit),1:2])  # these are envfit vectors scaled to each one another (i.e. multipied by square root of column r2)
+                  (env.loading.factor   <- sqrt((envfit.rest$vectors$r)[c(pval.limit)]))      # loading factor for the envfit scores to scale them according to their correlations
+                  (curr.plot.multiplier <- vegan:::ordiArrowMul(scores(envfit.rest,"vectors")[c(pval.limit),1:2],
+                                            at = c(0,0), fill = 1,display="sites", choices = c(1,2)))# multiplier to fit the current plot ratio
+                  env.arrows.x  <- as.data.frame(scores(envfit.rest,"vectors"))[c(pval.limit),1]
+                  env.arrows.y  <- as.data.frame(scores(envfit.rest,"vectors"))[c(pval.limit),2]
+                  env.names     <-rownames(as.data.frame(scores(envfit.rest,"vectors")))[c(pval.limit)]
+                  
+                  arrows(0, 0, env.arrows.x*curr.plot.multiplier*0.75, env.arrows.y*curr.plot.multiplier*0.75, lty=1, col="lightgrey",
+                         length = 0.15, angle = 30)
+                  text(env.arrows.x*curr.plot.multiplier*0.82, env.arrows.y*curr.plot.multiplier*0.82,
+                       labels=env.names)    
+
+
+                      # Optionally: plot species that were aposteriori fitted significantly if you wish to...
+                  
+                      pval.limit <- which(c(speciesfit$vectors$pvals)<=0.05) # set max p-value
+                      
+                      speciesfit.vectors <- scores(speciesfit,"vectors")[c(pval.limit),1:2]   # these are envfit vectors scaled to each one another (i.e. multipied by square root of column r2)
+                      species.loading.factor <- sqrt((speciesfit$vectors$r)[c(pval.limit)])   # loading factor for the envfit scores to scale them according to their correlations
+                      curr.plot.multiplier <-  vegan:::ordiArrowMul(scores(speciesfit,"vectors")[c(pval.limit),1:2],
+                                                at = c(0,0), fill = 1,display="sites", choices = c(1,2))# multiplier for current plot ratio
+                      
+                      species.arrows.x <- as.data.frame(scores(speciesfit,"vectors"))[,1][c(pval.limit)] 
+                      species.arrows.y <- as.data.frame(scores(speciesfit,"vectors"))[,2][c(pval.limit)] 
+                      species.names <-rownames(as.data.frame(scores(speciesfit,"vectors")))[c(pval.limit)]
+                      
+                      arrows(0, 0, species.arrows.x*curr.plot.multiplier*0.75  ,species.arrows.y* curr.plot.multiplier*0.75,
+                            lty=1,lwd=2, col="darkgreen",
+                            length = 0.15, angle = 30)
+                      text(species.arrows.x*curr.plot.multiplier *0.8, species.arrows.y*curr.plot.multiplier *0.8,
+                            labels=species.names)
+                      
+                      scores(speciesfit,"vectors")[c(pval.limit),1:2]
+
+
+
+    # plot viSNE cluster centroids
+    
+    cluster.color<-c(rgb(85,160,251, maxColorValue = 255),
+                         rgb(7,126,151,, maxColorValue = 255),
+                         rgb(0,0,255, maxColorValue = 255),
+                         rgb(148,100,31, maxColorValue = 255),
+                         rgb(197,148,78, maxColorValue = 255),
+                         rgb(128,128,0, maxColorValue = 255),
+                         rgb(192,181,123, maxColorValue = 255),
+                         rgb(255,0,0, maxColorValue = 255),
+                         rgb(255,128,128, maxColorValue = 255),
+                         rgb(255,224,224, maxColorValue = 255),
+                         rgb(0,0,0, maxColorValue = 255)
+                          )
+                     
+    points(ordiplot,"species",cex=2,pch=8, col=cluster.color)
+    text(ordiplot,"species",cex=1, pos=1,font=2, col=cluster.color)
+
+
+
+    # plot legend and axis with explained variance
+    
+    legend("topleft",pch=21,col=my.color1,pt.bg=my.color1,
+           legend=c("A","B","C","D","E","F"),bty="n")
+    title(xlab=as.expression(paste("RDA1 (",round(c(100/(Cluster.rda.best.forwsel$tot.chi)*(Cluster.rda.best.forwsel$CCA$eig[1])),2),"%)")),
+          ylab=as.expression(paste("RDA2 (",round(c(100/(Cluster.rda.best.forwsel$tot.chi)*(Cluster.rda.best.forwsel$CCA$eig[2])),2),"%)")))
+    
+    
+    dev.off()
+
+
+
+###########################################################################################################
+## Generalized Additive Models (GAMs) can be used to check non-linear trends of physico-chemical variables!
+###########################################################################################################
+
+for (i in c(1:ncol(PhysicoChemicalRaw)))   {
+    
+
+  pdf(paste(colnames(PhysicoChemicalRaw[i]), " GAM fitting",".pdf", sep=""),useDingbats=FALSE) #, width=4.5, height=4)
+        
+    
+        ordiplot<-plot(Cluster.rda.best.forwsel,type="none",choices = c(x<-1, y<-2),scaling=3,main="", #xlim=c(,),ylim=c(-,0),
+                       xlab="",ylab="")           
+        points(ordiplot,"sites", pch=21,cex=1.5, col=my.color1[as.numeric(Data$Location)], bg=my.color1[as.numeric(Data$Location)])
+        points(ordiplot,"species",cex=2,pch=8, col=cluster.color)
+        text(ordiplot,"species",cex=1, pos=1,font=2, col=cluster.color)
+        title(xlab=as.expression(paste("RDA1 (",round(c(100/(Cluster.rda.best.forwsel$tot.chi)*(Cluster.rda.best.forwsel$CCA$eig[1])),2),"%)")),
+        ylab=as.expression(paste("RDA2 (",round(c(100/(Cluster.rda.best.forwsel$tot.chi)*(Cluster.rda.best.forwsel$CCA$eig[2])),2),"%)")))
+    
+
+  
+  gam.PhysicoChemRaw<-ordisurf(as.formula(paste("Cluster.rda.best.forwsel ~ ",paste(colnames(PhysicoChemicalRaw[i])))),PhysicoChemicalRaw,
+                                          choices=c(x,y), knots=6,                                         
+                                          family="gaussian", isotropic= TRUE,
+                                          col="darkorange",scaling=3,
+                                          add = TRUE, display = "sites",
+                                          nlevels = 10, labcex = 0.8,
+                                          bubble = TRUE, cex = 1, select = TRUE, method = "REML",
+                                          gamma = 1, plot = TRUE)
+  (summary.gam.PhysicoChemRaw <- summary(gam.PhysicoChemRaw))
+  legend(0.3,0.6,,legend=as.expression(paste("Explained deviance of\n",colnames(PhysicoChemicalRaw[i]),
+                                                  round(c(summary.gam.PhysicoChemRaw$dev.expl)*100,2),
+                                                  "%   ","P=",
+                                                  round(c(summary.gam.PhysicoChemRaw$s.pv[[1]]),3))),cex=0.8,bty="n")
+  
+  
+  
+
+ 
+  dev.off()
+  
+}
+
+
+
+####################################################################
+# Additionally standalone plot of the vector fitting of the non-used 
+# environmental variables onto the RDA biplot
+####################################################################
+
+pdf("Envfit of not used variables on RDA.pdf",useDingbats=FALSE)
+    
+ordiplot<-plot(Cluster.rda.best.forwsel,type="none",choices = c(1, 2),scaling=3,main="",
+                xlab="",ylab="",  yaxt="n")
+                axis(4)
+    
+    (rest.model.env.selection <-PhysicoChemicalRaw[! c(colnames(PhysicoChemicalRaw)) %in% best.model.env.selection])
+    (ef.env.rda.Envfac <- envfit(Cluster.rda.best.forwsel  , rest.model.env.selection, permutations=999))
+    plot(ef.env.rda.Envfac, col="darkgrey", p.max=1)
+
+    (envfit.scores<- scores(ef.env.rda.Envfac,"vectors"))
+    (curr.plot.multiplier <-  vegan:::ordiArrowMul(scores(ef.env.rda.Envfac,"vectors"),
+                                                   at = c(0,0), fill = 1,display="species", choices = c(x,y)))
+
+          for (i in 1:(length(ef.env.rda.Envfac$vectors$arrows[,1]))){
+            if(       ef.env.rda.Envfac$vectors$pvals[i]<=0.05 & 
+                        ef.env.rda.Envfac$vectors$pvals[i]>0.01)
+            {
+              text(envfit.scores[i,1]*curr.plot.multiplier*0.9,
+                   envfit.scores[i,2]*curr.plot.multiplier*0.9,
+                   labels="*", col="darkgrey")
+            }
+            else if(       ef.env.rda.Envfac$vectors$pvals[i]<=0.01 & 
+                             ef.env.rda.Envfac$vectors$pvals[i]>0.001)
+            {
+              text(envfit.scores[i,1]*curr.plot.multiplier*0.9,
+                   envfit.scores[i,2]*curr.plot.multiplier*0.9,
+                   labels="**", col="darkgrey")
+            }
+            else if(ef.env.rda.Envfac$vectors$pvals[i]<=0.001)
+            {
+              text(envfit.scores[i,1]*curr.plot.multiplier*0.9,
+                   envfit.scores[i,2]*curr.plot.multiplier*0.9,
+                   labels="***", col="darkgrey")
+            }
+          }
+
+dev.off()
+
+
+# plot the fittet species occurence on the RDA bi-plot
+
+pdf("Speciesfit on RDA.pdf",useDingbats=FALSE)
+    
+    ordiplot<-plot(Cluster.rda.best.forwsel,type="none",choices = c(1, 2),scaling=3,main="",
+                   xlab="",ylab="",  yaxt="n")
+                   axis(4)
+    
+        (ef.spe.rda.Envfac <- envfit(Cluster.rda.best.forwsel  , SpeciesHel[,], permutations=999))
+        plot(ef.spe.rda.Envfac, col="darkgreen", p.max=1, lwd=1.5 , cex=1, font=3) # set max p value
+        
+        (envfit.scores<- scores(ef.spe.rda.Envfac,"vectors"))
+        (curr.plot.multiplier <-  vegan:::ordiArrowMul(scores(ef.spe.rda.Envfac,"vectors"),
+                                      at = c(0,0), fill = 1,display="species", choices = c(x,y)))
+    
+            for (i in 1:(length(ef.spe.rda.Envfac$vectors$arrows[,1]))){
+              if(       ef.spe.rda.Envfac$vectors$pvals[i]<=0.05 & 
+                          ef.spe.rda.Envfac$vectors$pvals[i]>0.01)
+              {
+                text(envfit.scores[i,1]*curr.plot.multiplier*0.9,
+                     envfit.scores[i,2]*curr.plot.multiplier*0.9,
+                     labels="*", col="darkgreen")
+              }
+              else if(       ef.spe.rda.Envfac$vectors$pvals[i]<=0.01 & 
+                          ef.spe.rda.Envfac$vectors$pvals[i]>0.001)
+              {
+                text(envfit.scores[i,1]*curr.plot.multiplier*0.9,
+                     envfit.scores[i,2]*curr.plot.multiplier*0.9,
+                     labels="**", col="darkgreen")
+              }
+              else if(ef.spe.rda.Envfac$vectors$pvals[i]<=0.001)
+              {
+                text(envfit.scores[i,1]*curr.plot.multiplier*0.9,
+                     envfit.scores[i,2]*curr.plot.multiplier*0.9,
+                     labels="***", col="darkgreen")
+              }
+            }
+    
+
+dev.off()
+
+
+
+###########################################################
+# Pearson Correlation of environmental variables an benthos
+###########################################################
+
+rcorrMatrix<-as.matrix(cbind(SpeciesHel,PhysicoChemicalLog))
+
+sink(file = "PearsonCorrBenthosPhyChem.txt", append = FALSE, type = c("output"),
+     split = FALSE)
+(CorrTable<-rcorr.adjust(rcorrMatrix[,], type="pearson"))
+sink()
+
+
+## heatmap of correlations
+
+
+matrixPearson3<-CorrTable$R$r[c(27:43),c(1:26)]
+pvalCellNote<-(CorrTable$R$P[c(27:43),c(1:26)])
+pvalCellNoteStars<- cut(pvalCellNote,  breaks=c(-Inf, 0.001, 0.01, 0.05),  label=c("***", " ** ", "  *  ")) 
+pvalCellNote<-matrix((pvalCellNoteStars), nrow=17, ncol=26)
+
+
+pdf("heatmap env spe pearson.pdf", height=10, width=10)
+heatmap.2(t(matrixPearson3),
+          Rowv=TRUE,
+          Colv=TRUE,
+          dendrogram= c("both"),
+          #distfun = NULL,
+          key=TRUE,
+          keysize=2,
+          trace="none",
+          density.info=c("none"),
+          margins=c(5, 12),
+          col=colorRampPalette(brewer.pal(9,"Greens"))(100),
+          cellnote=t(pvalCellNote),
+          notecex=1.0,
+          notecol="black",
+          na.color=par("bg"),
+          scale="none", 
+          symkey=TRUE,
+          cexRow=1,
+          cexCol=1,
+          srtRow=25
+          
+          
+)
+dev.off()
+
+
+
+############################################
+# Pearson Correlation of clusters an benthos
+############################################
+
+rcorrMatrix<-as.matrix(cbind(SpeciesHel,ClusterHel))
+
+sink(file = "PearsonCorrBenthosClus.txt", append = FALSE, type = c("output"),
+     split = FALSE)
+(CorrTable<-rcorr.adjust(rcorrMatrix[,], type="pearson"))
+sink()
+
+
+
+matrixPearson3<-CorrTable$R$r[c(27:37),c(1:26)]
+pvalCellNote<-(CorrTable$R$P[c(27:37),c(1:26)])
+pvalCellNoteStars<- cut(pvalCellNote,  breaks=c(-Inf, 0.001, 0.01, 0.05),  label=c("***", " ** ", "  *  ")) 
+pvalCellNote<-matrix((pvalCellNoteStars), nrow=11, ncol=26)
+
+
+pdf("heatmap spe cluster pearson.pdf", height=10, width=10)
+heatmap.2(t(matrixPearson3),
+          Rowv=TRUE,
+          Colv=TRUE,
+          dendrogram= c("both"),
+          #distfun = NULL,
+          key=TRUE,
+          keysize=2,
+          trace="none",
+          density.info=c("none"),
+          margins=c(5, 12),
+          col=colorRampPalette(brewer.pal(9,"Oranges"))(100),
+          cellnote=t(pvalCellNote),
+          notecex=1.0,
+          notecol="black",
+          na.color=par("bg"),
+          scale="none", 
+          symkey=TRUE,
+          cexRow=1,
+          cexCol=1,
+          srtRow=25
+          
+          
+)
+dev.off()
+
+
+
+###############################################################
+# Pearson Correlation of clusters an physico-chemical variables
+###############################################################
+
+rcorrMatrix<-as.matrix(cbind(PhysicoChemicalLog,ClusterHel))
+
+sink(file = "PearsonCorrPhyChemClus.txt", append = FALSE, type = c("output"),
+     split = FALSE)
+(CorrTable<-rcorr.adjust(rcorrMatrix[,], type="pearson"))
+sink()
+
+
+
+matrixPearson3<-CorrTable$R$r[c(1:17),c(18:28)]
+pvalCellNote<-(CorrTable$R$P[c(1:17),c(18:28)])
+pvalCellNoteStars<- cut(pvalCellNote,  breaks=c(-Inf, 0.001, 0.01, 0.05),  label=c("***", " ** ", "  *  ")) 
+pvalCellNote<-matrix((pvalCellNoteStars), nrow=17, ncol=11)
+
+
+pdf("heatmap physicochemical cluster pearson.pdf", height=10, width=10)
+heatmap.2(t(matrixPearson3),
+          Rowv=TRUE,
+          Colv=TRUE,
+          dendrogram= c("both"),
+          #distfun = NULL,
+          key=TRUE,
+          keysize=2,
+          trace="none",
+          density.info=c("none"),
+          margins=c(5, 12),
+          col=colorRampPalette(brewer.pal(9,"Blues"))(100),
+          cellnote=t(pvalCellNote),
+          notecex=1.0,
+          notecol="black",
+          na.color=par("bg"),
+          scale="none", 
+          symkey=TRUE,
+          cexRow=1,
+          cexCol=1,
+          srtRow=25
+          
+          #col=redgreen(75),
+)
+dev.off()
+
+
+
+##########################################
+## Bar Plots for the field sample clusters
+##########################################
+
+# define cluster colors
+
+cluster.color.barplot<- c(rgb(85,160,251, maxColorValue = 255),
+                          rgb(7,126,151,, maxColorValue = 255),
+                          rgb(0,0,255, maxColorValue = 255),
+                          rgb(148,100,31, maxColorValue = 255),
+                          rgb(197,148,78, maxColorValue = 255),
+                          rgb(128,128,0, maxColorValue = 255),
+                          rgb(192,181,123, maxColorValue = 255),
+                          rgb(255,0,0, maxColorValue = 255),
+                          rgb(255,128,128, maxColorValue = 255),
+                          rgb(255,224,224, maxColorValue = 255),
+                          rgb(0,0,0, maxColorValue = 255)
+                            )
+
+# barplot function with posthoc test annotation
+
+errorbarplot<-function(data,error,ylab,xlab,main,posthoc.vektor){
+            mar=par()$mar
+            par(xpd=T, mar=par()$mar+c(0,0,0,0))   # Makes a bit space to place the legend
+            maxy=max(data+error)*1.05              # Space enough for the max error + some space
+            bp<-barplot(data,beside=FALSE,ylab=ylab,xlab=xlab,main=main,ylim=c(0,maxy),
+                        width=1,col=cluster.color.barplot[i],space=rep(c(0.5)))   # beside = TRUE : matrix reihen values werden nebeneinander gebracht FALSE aufeinander
+            #segments(bp,data-error,bp,data+error)  # Draws the vertical lines in the error plot
+            segments(bp,data,bp,data+error) 
+            ew=(bp[2,1]-bp[1,1])/2                 # Sets the width of the error bars as half the bare
+            ew=ew/2.5
+            #segments(bp-ew,data-error,bp+ew,data-error)
+            segments(bp-ew,data+error,bp+ew,data+error)
+            text(bp,data+error+maxy/100*3, labels= posthoc.vektor, cex=1.5)
+            
+            
+            par(mar=mar)                           # Resets the width of the plotmargins.
+                              }
+
+
+
+
+# set up data averages and std errors for the clusters
+# normalized and arcsine sqrt transformed data are used for the ANOVAs
+
+    ClusterBarAv<-aggregate(ClusterNorm,by = list(Data$Location), mean, ra.rm=TRUE)
+    ClusterBarAv<-ClusterBarAv[order(ClusterBarAv$Group.1),]
+    (ClusterBarAv<-ClusterBarAv[,-c(1)])
+    ClusterBarAv<- ClusterBarAv*100
+    
+    ClusterBarError<-aggregate(ClusterNorm,by = list(Data$Location), std.error, na.rm=TRUE)
+    ClusterBarError<-ClusterBarError[order(ClusterBarError$Group.1),]
+    (ClusterBarError<-ClusterBarError[,-c(1)])
+    ClusterBarError<-ClusterBarError*100
+    
+    ClusterAsinSqrt <- asin(sqrt(ClusterNorm))
+    ClusterAnova <-    cbind(ClusterAsinSqrt, Location)
+
+
+
+# ANOVA model with posthoc test and automatic printing for all clusters to PDF
+
+ClusterAnova$Tuke<-with(ClusterAnova,interaction(Location), sep="x") # Location as interaction term
+
+# test with Anovas followed by Tukeys HSD
+
+for (i in c(1:ncol(ClustersRaw)))   {
+
+  options(contrasts=c(factor="contr.sum",ordered="contr.poly"))      ## SPSS type III ... marginal 
+  
+  (Anova(lm(ClusterAnova[,i]~Location,data=ClusterAnova,
+            contrasts=list(Location=contr.sum)),
+         type=3, singular.ok=TRUE))
+  Tukey.lm<-lm(ClusterAnova[,i]~Tuke,data=ClusterAnova)
+  TukeComp<-glht(Tukey.lm, linfct= mcp(Tuke = "Tukey"), p.adjust="holmes")
+
+  (mod.cld <- cld(TukeComp))
+
+            mod.cld.attr.unordered<-  as.data.frame(mod.cld$mcletters$Letters)
+            mod.cld.attr.unordered$id <- row.names(mod.cld.attr.unordered)
+            
+            target.Order <- c("A","B", "C","D", "E", "F")
+            
+            mod.cld.attr.ordered<- mod.cld.attr.unordered[match(target.Order, mod.cld.attr.unordered$id),]
+            posthoc.vektor<- mod.cld.attr.ordered[,1]
+
+
+            # bar plot with the post-hoc annotation
+            
+            data=ClusterBarAv[,i]
+            error=ClusterBarError[,i]
+            posthoc.vektor<- c(as.character(mod.cld.attr.ordered[,1]))
+            
+            main=""
+            xlab=""
+            ylab=""
+            
+            clustername<-c("MA1","MA1a","MA2","MA3","MA4","MA5","MA6",
+                           "MA7","MA8","MA9","MA10")
+            
+            pdf(paste(clustername[i], "Posthoc",".pdf", sep=""))
+            bp<-errorbarplot(data,error,ylab,xlab,main,posthoc.vektor)
+            
+            mtext(side = 2,cex= 1.5, text = paste(clustername[i],"[% events]",space=""), line = 2)
+            labels = c("A","B", "C","D", "E", "F")
+            axis(1,at= c(1,2.5,4,5.5,7,8.5),tck=-0.01, labels=labels, line=0, cex=1.5)            
+            box()
+  
+    dev.off()
+  
+}
+
+
+
+
+
+
+
+#############################################
+# Barplots for the lab temperature experiment
+#############################################
+
+
+
+cluster.color.barplot<- c(rgb(85,160, 251, maxColorValue = 255),
+                          rgb(0,0,255, maxColorValue = 255),
+                          rgb(148,100,31, maxColorValue = 255),
+                          rgb(197,148,78, maxColorValue = 255),
+                          rgb(65,2,87, maxColorValue = 255),
+                          rgb(140,125,55, maxColorValue = 255),
+                          rgb(192,181,123, maxColorValue = 255),
+                          rgb(255,96,0, maxColorValue = 255),
+                          rgb(255,128,0, maxColorValue = 255),
+                          rgb(255,160,64, maxColorValue = 255),
+                          rgb(255,192,128, maxColorValue = 255),
+                          rgb(249,64,64, maxColorValue = 255),
+                          rgb(255,128,128, maxColorValue = 255),
+                          rgb(255,160,160, maxColorValue = 255),
+                          rgb(255,224,224, maxColorValue = 255)
+                          )
+
+
+
+# set up data averages and std errors for the clusters
+# use normalized data and arcsine sqrt transformed values for the ANOVAs
+
+ClusterBarAv<-aggregate(ClusterLabNorm  ,by = list(Data.Lab$time), mean, ra.rm=TRUE)
+ClusterBarAv<-ClusterBarAv[order(ClusterBarAv$Group.1),]
+(ClusterBarAv<-ClusterBarAv[,-c(1)])
+ClusterBarAv<- ClusterBarAv*100
+
+ClusterBarError<-aggregate(ClusterLabNorm  ,by = list(Data.Lab$time), std.error, na.rm=TRUE)
+ClusterBarError<-ClusterBarError[order(ClusterBarError$Group.1),]
+(ClusterBarError<-ClusterBarError[,-c(1)])
+ClusterBarError<-ClusterBarError*100
+
+ClusterAsinSqrt <- asin(sqrt(ClusterLabNorm))
+ClusterAnova <-    cbind(ClusterAsinSqrt, Time)
+
+
+
+#  ANOVA model with posthoc test and automatic printing for all clusters to PDF
+
+ClusterAnova$Tuke<-with(ClusterAnova,interaction(Time), sep="x") # Location as interaction term
+
+## test with Anovas followed by Tukeys HSD
+
+for (i in c(1:ncol(Clusters.Lab.Raw)))   {
+  
+  options(contrasts=c(factor="contr.sum",ordered="contr.poly"))      ## SPSS type III ... marginal 
+  
+  (Anova(lm(ClusterAnova[,i]~Time,data=ClusterAnova,
+            contrasts=list(Time=contr.sum)),
+         type=3, singular.ok=TRUE))
+  Tukey.lm<-lm(ClusterAnova[,i]~Tuke,data=ClusterAnova)
+  TukeComp<-glht(Tukey.lm, linfct= mcp(Tuke = "Tukey"), p.adjust="holmes")
+  
+  (mod.cld <- cld(TukeComp))
+          
+          mod.cld.attr.unordered<-  as.data.frame(mod.cld$mcletters$Letters)
+          mod.cld.attr.unordered$id <- row.names(mod.cld.attr.unordered)
+          
+          target.Order <- c("t0","t1", "t2","t3")
+          
+          mod.cld.attr.ordered<- mod.cld.attr.unordered[match(target.Order, mod.cld.attr.unordered$id),]
+          posthoc.vektor<- mod.cld.attr.ordered[,1]
+  
+  
+          ## make the bar plot with the post-hoc annotation
+          
+          data=ClusterBarAv[,i]
+          error=ClusterBarError[,i]
+          posthoc.vektor<- c(as.character(mod.cld.attr.ordered[,1]))
+          
+          main=""
+          xlab=""
+          ylab=""
+           
+          clustername<-c("LA1","LA2","LA3","LA4","LA5","LA6",
+                         "LA7","LA8","LA9","LA10","LA11","LA12","LA13","LA14","LA15")
+          
+          pdf(paste(clustername[i], "Posthoc",".pdf", sep="")) #, width=4.5, height=4)
+          bp<-errorbarplot(data,error,ylab,xlab,main,posthoc.vektor)
+        
+          mtext(side = 2,cex= 1.5, text = paste(clustername[i],"[% of all events]",space=""), line = 2)
+          labels = c("t0","t1", "t2","t3")
+          axis(1,at= c(1,2.5,4,5.5),tck=-0.01, labels=labels, line=0, cex=1.5)            
+          box()
+  
+  dev.off()
+  
+}
