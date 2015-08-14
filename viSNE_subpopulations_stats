@@ -1,4 +1,5 @@
-############################################################################
+
+###################################################################################################
 #                                                                                                 
 # SCRIPT FOR STATISTICAL EVALUATIONS OF THE DATA SETS FROM THE MANUSCRIPT:
 #
@@ -7,7 +8,7 @@
 #
 #  by Sgier L, Freimann R, Zupanic A, Kroll A [2015]
 #                                                                                                 
-############################################################################
+###################################################################################################
 
 
 
@@ -97,9 +98,9 @@ Cluster.rda<-rda(ClusterHel~., PhysicoChemicalLog)
 
 
 
-#################################################
-# the best terms for the final model are assessed
-#################################################
+####################################################################################
+## the best terms for the final model are assessed
+####################################################################################
 
 (summarized.selection<- c(rownames(Cluster.rda.forward$CCA$biplot),
                          rownames(Cluster.rda.backward$CCA$biplot),
@@ -111,12 +112,12 @@ Cluster.rda<-rda(ClusterHel~., PhysicoChemicalLog)
     
 
 
-#######################################################################################################
+###########################################################################################################
 #
 # Run selected RDA model and apriori fit benthic species and physico-chemical variables not included in
 # the RDA
 #
-########################################################################################################
+###########################################################################################################
 
 (Cluster.rda.best.forwsel <- rda(FORMULA, PhysicoChemicalLog))
 summary(Cluster.rda.best.forwsel)
@@ -155,9 +156,9 @@ summary(Cluster.rda.best.forwsel)
 
 
 
-#########################################################################################
+##########################################################################################################
 # Bi-plot of the RDA model          (all following plots will be directly saved as PDF's)
-#########################################################################################
+##########################################################################################################
 
         my.color1<-c(gray.colors(length(unique(Location)), start = 0.1, end = 0.9, gamma = 2.2, alpha = NULL))
         my.color2<-c("dodgerblue","yellow", "cyan", "yellow2", "lightblue","orange")
@@ -268,9 +269,9 @@ points(ordiplot,"sites", pch=21,cex=1.5, col=my.color1[as.numeric(Data$Location)
 
 
 
-###########################################################################################################
+#######################################################################################################
 ## Generalized Additive Models (GAMs) can be used to check non-linear trends of physico-chemical variables!
-###########################################################################################################
+#####################################################################################################
 
 for (i in c(1:ncol(PhysicoChemicalRaw)))   {
     
@@ -312,10 +313,10 @@ for (i in c(1:ncol(PhysicoChemicalRaw)))   {
 
 
 
-####################################################################
+############################################################################################
 # Additionally standalone plot of the vector fitting of the non-used 
 # environmental variables onto the RDA biplot
-####################################################################
+############################################################################################
 
 pdf("Envfit of not used variables on RDA.pdf",useDingbats=FALSE)
     
@@ -400,9 +401,9 @@ dev.off()
 
 
 
-###########################################################
+#############################################################
 # Pearson Correlation of environmental variables an benthos
-###########################################################
+#############################################################
 
 rcorrMatrix<-as.matrix(cbind(SpeciesHel,PhysicoChemicalLog))
 
@@ -449,9 +450,9 @@ dev.off()
 
 
 
-############################################
+#############################################################
 # Pearson Correlation of clusters an benthos
-############################################
+#############################################################
 
 rcorrMatrix<-as.matrix(cbind(SpeciesHel,ClusterHel))
 
@@ -496,9 +497,9 @@ dev.off()
 
 
 
-###############################################################
+#############################################################
 # Pearson Correlation of clusters an physico-chemical variables
-###############################################################
+#############################################################
 
 rcorrMatrix<-as.matrix(cbind(PhysicoChemicalLog,ClusterHel))
 
@@ -543,9 +544,9 @@ dev.off()
 
 
 
-##########################################
+############################################################################################
 ## Bar Plots for the field sample clusters
-##########################################
+############################################################################################
 
 # define cluster colors
 
@@ -617,7 +618,7 @@ for (i in c(1:ncol(ClustersRaw)))   {
             contrasts=list(Location=contr.sum)),
          type=3, singular.ok=TRUE))
   Tukey.lm<-lm(ClusterAnova[,i]~Tuke,data=ClusterAnova)
-  TukeComp<-glht(Tukey.lm, linfct= mcp(Tuke = "Tukey"), p.adjust="holmes")
+  (TukeComp<- summary(TukeComp<-glht(Tukey.lm, linfct= mcp(Tuke = "Tukey")), test =adjusted (type ="holm")))
 
   (mod.cld <- cld(TukeComp))
 
@@ -661,9 +662,9 @@ for (i in c(1:ncol(ClustersRaw)))   {
 
 
 
-#############################################
+#############################################################################################
 # Barplots for the lab temperature experiment
-#############################################
+#############################################################################################
 
 
 
@@ -718,7 +719,7 @@ for (i in c(1:ncol(Clusters.Lab.Raw)))   {
             contrasts=list(Time=contr.sum)),
          type=3, singular.ok=TRUE))
   Tukey.lm<-lm(ClusterAnova[,i]~Tuke,data=ClusterAnova)
-  TukeComp<-glht(Tukey.lm, linfct= mcp(Tuke = "Tukey"), p.adjust="holmes")
+  (TukeComp<- summary(TukeComp<-glht(Tukey.lm, linfct= mcp(Tuke = "Tukey")), test =adjusted (type ="holm")))
   
   (mod.cld <- cld(TukeComp))
           
@@ -755,3 +756,11 @@ for (i in c(1:ncol(Clusters.Lab.Raw)))   {
   dev.off()
   
 }
+
+
+
+
+
+
+
+
