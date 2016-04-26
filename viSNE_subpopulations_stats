@@ -71,7 +71,8 @@ Time                <-Data.Lab[,c((which(colnames(Data.Lab)=="time")))]
 ClusterHel           <-decostand(ClustersRaw, "hellinger")     # square root of equally standardized row sums
 ClusterNorm          <-decostand(ClustersRaw, method="total")  # standardized to equal row sum
 
-PhysicoChemicalLog   <-log1p(PhysicoChemicalRaw)
+PhysicoChemicalLog <- cbind( log1p(PhysicoChemicalRaw[,c(1,2)]), PhysicoChemicalRaw[,c(3)], log1p(PhysicoChemicalRaw[,4:length(PhysicoChemicalRaw)]))
+                      colnames(PhysicoChemicalLog)[3]<-"pH"
 PhysicoChemicalHel   <-decostand(PhysicoChemicalRaw, method="hellinger")
 SpeciesHel           <-decostand(SpeciesRaw, "hellinger")
 
