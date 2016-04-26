@@ -108,8 +108,8 @@ Cluster.rda<-rda(ClusterHel~., PhysicoChemicalLog)
                          rownames(Cluster.rda.both$CCA$biplot)))
 
 (constrains.freq.table<- as.data.frame(sort(table(summarized.selection))))
-(FORMULA <-as.formula(paste("ClusterHel ~ ",paste(names(which(constrains.freq.table[,1]>=2)),
-                                                   collapse="+"),sep = "")))   
+(FORMULA <-as.formula(paste("ClusterHel ~ ", paste(constrains.freq.table$summarized.selection[c(which(constrains.freq.table[,2]>=2))],
+                              collapse="+"),sep = "")))
     
 
 
